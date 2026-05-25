@@ -1,161 +1,203 @@
-# pdf_generator.py - FINAL FIXED VERSION (SELLING READY)
-
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import cm
-import os
 from datetime import datetime
+from pathlib import Path
+
+from marksheet_utils import calculate_summary, get_grade, subject_obtained
 
 
-def get_grade(marks, max_marks=100):
-    percent = (marks / max_marks) * 100
-    if percent >= 90:
-        return "A1"
-    elif percent >= 80:
-        return "A2"
-    elif percent >= 70:
-        return "B1"
-    elif percent >= 60:
-        return "B2"
-    elif percent >= 50:
-        return "C1"
-    elif percent >= 40:
-        return "C2"
-    elif percent >= 33:
-        return "D"
-    else:
-        return "F"
+def _fit_text(canvas, text, max_width, font_name, font_size):
+    value = str(text or "")
+    if canvas.stringWidth(value, font_name, font_size) <= max_width:
+        return value
+
+    suffix = "..."
+    while value and canvas.stringWidth(value + suffix, font_name, font_size) > max_width:
+        value = value[:-1]
+    return value + suffix if value else suffix
 
 
-def generate_pdf(save_path, roll, s):
-    """
-    save_path : full path selected by user
-    roll      : roll number
-    s         : student data dictionary
-    """
+def _draw_label_value(canvas, x, y, label, value, max_width):
+    label_font = "Helvetica-Bold"
+    value_font = "Helvetica"
+    canvas.setFont(label_font, 9)
+    canvas.drawString(x, y, f"{label}:")
+    canvas.setFont(value_font, 9)
+    canvas.drawString(x + 74, y, _fit_text(canvas, value, max_width - 74, value_font, 9))
 
-    c = canvas.Canvas(save_path, pagesize=A4)
-    w, h = A4
 
-    # ---------------- BACKGROUND ----------------
-    bg = "assets/marksheet_bg.jpg"
-    if os.path.exists(bg):
-        c.drawImage(bg, 0, 0, w, h)
+def generate_pdf(save_path, roll, record, session=""):
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+    except ImportError as exc:
+        raise RuntimeError("ReportLab is required to generate PDFs. Install it with: pip install reportlab") from exc
 
-    # ---------------- HEADER ----------------
-    c.setFont("Helvetica-Bold", 18)
-    c.drawCentredString(w / 2, h - 3 * cm, s["school"]["name"].upper())
+    path = Path(save_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-    c.setFont("Helvetica", 12)
-    c.drawCentredString(w / 2, h - 4 * cm, "AFFILIATED TO MP BOARD")
-    c.drawCentredString(
-        w / 2,
-        h - 4.8 * cm,
-        f"ANNUAL EXAMINATION {datetime.now().year}",
-    )
+    school = record.get("school", {})
+    student = record.get("student", {})
+    subjects = record.get("subjects", [])
+    summary = calculate_summary(subjects)
 
-    c.setFont("Helvetica-Bold", 14)
-    c.drawCentredString(
-        w / 2,
-        h - 6 * cm,
-        f"{s['student']['class']} MARKSHEET",
-    )
+    c = canvas.Canvas(str(path), pagesize=A4)
+    width, height = A4
+    margin = 42
+    inner_width = width - (margin * 2)
 
-    # ---------------- STUDENT DETAILS ----------------
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(2 * cm, h - 8 * cm, "STUDENT DETAILS")
+    primary = colors.HexColor("#1f6f8b")
+    text = colors.HexColor("#172033")
+    muted = colors.HexColor("#637083")
+    border = colors.HexColor("#d8e0ea")
+    surface = colors.HexColor("#f4f7fb")
+    success = colors.HexColor("#19764a")
+    danger = colors.HexColor("#b42318")
 
-    c.setFont("Helvetica", 11)
-    st = s["student"]
+    c.setTitle(f"Marksheet {roll}")
+    c.setAuthor(str(school.get("name", "School Marksheet System")))
 
-    c.drawString(2 * cm, h - 8.8 * cm, f"Name        : {st['name']}")
-    c.drawString(2 * cm, h - 9.4 * cm, f"Father Name : {st['father']}")
-    c.drawString(2 * cm, h - 10 * cm, f"Mother Name : {st['mother']}")
-    c.drawString(2 * cm, h - 10.6 * cm, f"Roll No     : {roll}")
-    c.drawString(2 * cm, h - 11.2 * cm, f"Class       : {st['class']}")
-    c.drawString(
-        2 * cm,
-        h - 11.8 * cm,
-        f"Session     : {datetime.now().year-1}-{str(datetime.now().year)[-2:]}",
-    )
+    c.setFillColor(primary)
+    c.rect(0, height - 14, width, 14, fill=1, stroke=0)
 
-    # ---------------- TABLE HEADER ----------------
-    table_y = h - 8 * cm
-    c.setFont("Helvetica-Bold", 11)
+    c.setStrokeColor(border)
+    c.setLineWidth(1.2)
+    c.roundRect(margin / 2, margin / 2, width - margin, height - margin, 8, stroke=1, fill=0)
 
-    c.drawString(12 * cm, table_y, "S.No")
-    c.drawString(14 * cm, table_y, "SUBJECT")
-    c.drawString(19 * cm, table_y, "MAX")
-    c.drawString(21 * cm, table_y, "OBT")
-    c.drawString(23 * cm, table_y, "GR")
-
-    # ---------------- SUBJECTS ----------------
-    c.setFont("Helvetica", 10)
-    y = table_y - 0.8 * cm
-
-    total = 0
-    max_total = 0
-
-    for i, sub in enumerate(s["subjects"], 1):
-        theory = sub["theory"]
-        practical = sub.get("practical", 0)
-        obtained = theory + practical
-        max_marks = sub["max"]
-
-        total += obtained
-        max_total += max_marks
-
-        c.drawRightString(13 * cm, y, str(i))
-        c.drawString(14 * cm, y, sub["name"][:20])
-        c.drawRightString(20 * cm, y, str(max_marks))
-        c.drawRightString(22 * cm, y, str(obtained))
-        c.drawRightString(
-            24 * cm,
-            y,
-            get_grade(obtained, max_marks),
-        )
-
-        y -= 0.6 * cm
-
-    # ---------------- RESULT ----------------
-    percent = (total / max_total) * 100 if max_total else 0
-    result = "PASS" if percent >= 33 else "FAIL"
-
-    c.setFont("Helvetica-Bold", 14)
-    c.drawCentredString(w / 2, y - 1 * cm, f"TOTAL : {total} / {max_total}")
-    c.drawCentredString(w / 2, y - 1.8 * cm, f"PERCENTAGE : {percent:.2f}%")
-
+    y = height - 56
+    c.setFillColor(text)
     c.setFont("Helvetica-Bold", 20)
-    c.drawCentredString(w / 2, y - 3 * cm, result)
+    c.drawCentredString(width / 2, y, _fit_text(c, school.get("name", "School Name"), inner_width, "Helvetica-Bold", 20))
 
-    division = (
-        "FIRST DIVISION"
-        if percent >= 60
-        else "SECOND DIVISION"
-        if percent >= 45
-        else "THIRD DIVISION"
-    )
+    y -= 18
+    c.setFont("Helvetica", 10)
+    c.setFillColor(muted)
+    address = school.get("address") or school.get("sub_title") or ""
+    c.drawCentredString(width / 2, y, _fit_text(c, address, inner_width, "Helvetica", 10))
 
-    c.setFont("Helvetica-Bold", 12)
-    c.drawCentredString(w / 2, y - 4.2 * cm, division)
+    y -= 26
+    c.setFillColor(primary)
+    c.setFont("Helvetica-Bold", 13)
+    c.drawCentredString(width / 2, y, "ACADEMIC MARKSHEET")
 
-    # ---------------- SIGNATURE ----------------
-    c.setFont("Helvetica-Bold", 11)
-    c.drawCentredString(7 * cm, 3 * cm, "Class Teacher")
-    c.drawCentredString(14 * cm, 3 * cm, "Principal")
-    c.drawCentredString(21 * cm, 3 * cm, "Head Examiner")
+    y -= 12
+    c.setStrokeColor(border)
+    c.line(margin, y, width - margin, y)
 
-    # ---------------- FOOTER ----------------
+    details_top = y - 28
+    details_height = 98
+    c.setFillColor(surface)
+    c.roundRect(margin, details_top - details_height, inner_width, details_height, 8, stroke=0, fill=1)
+    c.setStrokeColor(border)
+    c.roundRect(margin, details_top - details_height, inner_width, details_height, 8, stroke=1, fill=0)
+
+    details = [
+        ("Name", student.get("name", "")),
+        ("Roll No", roll),
+        ("Father", student.get("father", "")),
+        ("Class", student.get("class", "")),
+        ("Mother", student.get("mother", "")),
+        ("Session", session or student.get("session", "")),
+        ("DOB", student.get("dob", "")),
+        ("Result Type", student.get("type", "Regular")),
+    ]
+
+    left_x = margin + 18
+    right_x = margin + (inner_width / 2) + 10
+    row_y = details_top - 24
+    for index, (label, value) in enumerate(details):
+        x = left_x if index % 2 == 0 else right_x
+        row = index // 2
+        _draw_label_value(c, x, row_y - (row * 20), label, value, (inner_width / 2) - 28)
+
+    table_top = details_top - details_height - 34
+    table_x = margin
+    column_widths = [36, 190, 58, 58, 52, 68, 49]
+    headers = ["S.No", "Subject", "Theory", "Practical", "Max", "Obtained", "Grade"]
+    row_height = 24
+
+    c.setFillColor(primary)
+    c.roundRect(table_x, table_top - row_height, inner_width, row_height, 6, stroke=0, fill=1)
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 8.5)
+
+    x = table_x
+    for header, column_width in zip(headers, column_widths):
+        c.drawString(x + 6, table_top - 16, header)
+        x += column_width
+
+    y = table_top - row_height
     c.setFont("Helvetica", 9)
-    c.drawCentredString(
-        w / 2,
-        1.5 * cm,
-        f"Date : {datetime.now().strftime('%d/%m/%Y')}",
-    )
-    c.drawCentredString(
-        w / 2,
-        1 * cm,
-        "This is a computer generated marksheet",
-    )
+    c.setFillColor(text)
+
+    for index, subject in enumerate(subjects, 1):
+        y -= row_height
+        if index % 2 == 0:
+            c.setFillColor(colors.HexColor("#f8fafc"))
+            c.rect(table_x, y, inner_width, row_height, stroke=0, fill=1)
+            c.setFillColor(text)
+
+        theory = int(subject.get("theory", 0) or 0)
+        practical = int(subject.get("practical", 0) or 0)
+        max_marks = int(subject.get("max", 0) or 0)
+        obtained = subject_obtained(subject)
+        values = [
+            str(index),
+            _fit_text(c, subject.get("name", ""), column_widths[1] - 12, "Helvetica", 9),
+            str(theory),
+            str(practical),
+            str(max_marks),
+            str(obtained),
+            get_grade(obtained, max_marks),
+        ]
+
+        x = table_x
+        for value, column_width in zip(values, column_widths):
+            c.drawString(x + 6, y + 8, value)
+            x += column_width
+
+        c.setStrokeColor(border)
+        c.line(table_x, y, table_x + inner_width, y)
+
+    c.setStrokeColor(border)
+    c.rect(table_x, y, inner_width, table_top - y, stroke=1, fill=0)
+
+    summary_y = max(y - 70, 120)
+    c.setFillColor(surface)
+    c.roundRect(margin, summary_y, inner_width, 48, 8, stroke=0, fill=1)
+    c.setStrokeColor(border)
+    c.roundRect(margin, summary_y, inner_width, 48, 8, stroke=1, fill=0)
+
+    summary_items = [
+        ("Total", f"{summary['total_obtained']} / {summary['total_max']}"),
+        ("Percentage", f"{summary['percentage']:.2f}%"),
+        ("Result", summary["result"]),
+        ("Division", summary["division"]),
+    ]
+    item_width = inner_width / len(summary_items)
+    for index, (label, value) in enumerate(summary_items):
+        x = margin + (index * item_width) + 12
+        c.setFillColor(muted)
+        c.setFont("Helvetica", 8)
+        c.drawString(x, summary_y + 30, label.upper())
+        c.setFillColor(success if label == "Result" and value == "PASS" else danger if label == "Result" else text)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x, summary_y + 13, _fit_text(c, value, item_width - 18, "Helvetica-Bold", 11))
+
+    c.setStrokeColor(border)
+    c.line(margin + 14, 86, margin + 142, 86)
+    c.line((width / 2) - 64, 86, (width / 2) + 64, 86)
+    c.line(width - margin - 142, 86, width - margin - 14, 86)
+
+    c.setFillColor(text)
+    c.setFont("Helvetica-Bold", 9)
+    c.drawCentredString(margin + 78, 70, "Class Teacher")
+    c.drawCentredString(width / 2, 70, "Principal")
+    c.drawCentredString(width - margin - 78, 70, "Head Examiner")
+
+    c.setFont("Helvetica", 8)
+    c.setFillColor(muted)
+    c.drawCentredString(width / 2, 40, f"Generated on {datetime.now().strftime('%d/%m/%Y')}")
+    c.drawCentredString(width / 2, 28, "This is a computer generated marksheet.")
 
     c.save()
+    return str(path)

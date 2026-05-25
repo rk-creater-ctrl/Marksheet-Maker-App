@@ -1,11 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
+
+datas = []
+for source, target in (("assets", "assets"), ("students.json", ".")):
+    if Path(source).exists():
+        datas.append((source, target))
+
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=datas,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -22,7 +30,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='main',
+    name='SchoolMarksheet',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -35,4 +43,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='assets/app_icon.ico',
 )

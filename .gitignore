@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.tmp
+
+build/
+dist/
+
+output/*.pdf
+
+.env
+.venv/
+venv/
